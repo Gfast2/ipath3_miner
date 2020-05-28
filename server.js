@@ -1,10 +1,16 @@
 "use strict";
-var fs = require("fs"),
-  readline = require("readline");
+const fs = require("fs");
+const readline = require("readline");
 const https = require("https");
 
 const line_divider = "\r\n"; // between line, they should be join with this
 const data_divider = "+"; // meta data of each line should be joined with this
+
+let id_pointer = 0;
+let chinese_id = "1";
+let line_buff = [];
+let pool_payload = [];
+let pool_cid = [];
 
 const buildPayload = (pl) =>
   "selection=" +
@@ -25,12 +31,6 @@ var rd = readline.createInterface({
   console: false,
 });
 
-let id_pointer = 4024;
-let chinese_id = "1";
-let line_buff = [];
-let pool_payload = [];
-let pool_cid = [];
-
 rd.on("line", function (line) {
   const n = line.split("\t");
   const [x, ...y] = n;
@@ -45,14 +45,22 @@ rd.on("line", function (line) {
   }
 });
 
+/** 
+ * Return Text about the current working / -ed line's chinese_id / index
+ */
+const whereVR = () => `chinese_id:${pool_cid[id_pointer]},index:${id_pointer}`;
+
 /**
  * Start query the next entry
  */
 const queryNext = () => {
-  return; // uncommen when one-shot wanted
+  // return; // uncommen to one-shot
   id_pointer++;
   if (id_pointer >= pool_cid.length) {
-    console.log("All query done");
+    console.log("+--------------------+");
+    console.log("| ! All query done ! |");
+    console.log("+--------------------+");
+    console.log("/nReview error.log, may some entry query failed.");
     return;
   }
   getRequest();
@@ -66,14 +74,10 @@ const writeSVG = (payload) => {
     function (err) {
       if (err) {
         console.log(err);
-        console.log(
-          `Software breaked at chinese_id: ${pool_cid[id_pointer]}, index: ${id_pointer}`
-        );
+        console.log(`Software breaked at ${whereVR()}`);
         return;
       }
-      console.log(
-        `done: chinese_id: ${pool_cid[id_pointer]}, index: ${id_pointer}`
-      );
+      console.log(`done: ${whereVR()}`);
       queryNext();
     }
   );
@@ -86,9 +90,7 @@ const writeSVG = (payload) => {
 const logError = (payload) => {
   fs.appendFile(`error.log`, payload, "utf8", function (err) {
     if (err) return console.log("Error when writing error.log. ", err);
-    console.log(
-      `Error when querying: chinese_id: ${pool_cid[id_pointer]}, index: ${id_pointer}`
-    );
+    console.log(`Error when querying: ${whereVR()}`);
     queryNext();
   });
 };
@@ -112,8 +114,6 @@ const getRequest = () => {
   };
 
   var req = https.request(options, (res) => {
-    // console.log("statusCode:", res.statusCode);
-    // console.log("headers:", res.headers);
 
     res.on("data", (d) => {
       // process.stdout.write(d);
@@ -122,55 +122,21 @@ const getRequest = () => {
 
     // When all data transferred
     res.on("close", () => {
-      // console.log(data_buffer);
-      // console.log("close event of https.request");
-      // TODO: check if its the last index, if not, call getRequest again.
       writeSVG(data_buffer);
     });
   });
 
-  // This will cover Timeout error, attenion: When "error" event (here) tirggered, the "close" event won't
+  // This will cover Timeout error. Attenion: When "error" event (here) tirggered, the "close" event won't
   req.on("error", (e) => {
     console.error(e);
-    console.error(
-      `Error: chinese_id: ${pool_cid[id_pointer]}, index: ${id_pointer}`
-    );
-    logError(`${id_pointer},${pool_cid[id_pointer]}\n`);
+    console.error(`Error: ${whereVR()}`);
+    logError(`${whereVR()}\n`);
   });
 
   req.write(postData);
-  req.end(/*() => console.log('finished') */);
+  req.end();
 };
 
 rd.on("close", () => {
-  //   console.log("file read done");
-  //   console.log(pool_payload[0]);
-  //   console.log("//////////////////////////////////////");
-  //   console.log(pool_payload[1]);
-  // console.log('//////////////////////////////////////');
-  // console.log(pool[2]);
   getRequest(id_pointer);
 });
-
-///////////////////////////////////// NOTE /////////////////////////////////////
-
-// one example payload:
-const example =
-  "selection=C11545+%23ff0000+W20%0D%0AUNIPROT%3AQ9HAW9+%2300ff00+W10%0D%0Amap00040+%230000ff+W10" +
-  "&default_opacity=1" +
-  "&default_width=3" +
-  "&default_radius=7" +
-  "&default_color=%23aaaaaa" +
-  "&background_color=%23ffffff" +
-  "&tax_filter=" +
-  "&map=metabolic" +
-  "&export_type=svg" +
-  "&export_dpi=120";
-
-/* 
-TODO: 
-1. read one line, replace '/t' with '+' between meata data and append '\r\n' at the end
-2. check if the next with the same chinese_id, if yes, jump to step 1
-3. make the request, write down the result in separate data named with chinese_id, if failed, append 
-   this chinese_id into error report file
-*/
